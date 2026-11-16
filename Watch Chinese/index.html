@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>中文時間</title>
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Chinese Watch">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon-v3.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#1a1a1a; --card:#eee; --accent:#d33; --ok:#2a9d4a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --card:#2a2a2a; --accent:#f66; --ok:#3fb866; } }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font-family:-apple-system,system-ui,sans-serif; }
+  .top { display:flex; justify-content:space-between; align-items:center; max-width:800px; margin-bottom:12px; }
+  h1 { font-size:1.3rem; margin:0; }
+  .tabs, .grid, .ctrl, .add { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; max-width:800px; }
+  button { padding:8px 14px; border:0; border-radius:999px; background:var(--card); color:var(--fg); font-size:.95rem; }
+  .tabs button.on, #wbtn.on { background:var(--accent); color:#fff; }
+  .grid button { min-width:40px; padding:8px 0; border-radius:8px; }
+  .grid button.watched { background:var(--ok); color:#fff; }
+  .grid button.cur { outline:3px solid var(--accent); }
+  .grid button.na { opacity:.35; text-decoration:line-through; }
+  .wrap { position:relative; width:100%; max-width:800px; aspect-ratio:16/9; }
+  .wrap iframe { position:absolute; inset:0; width:100%; height:100%; border:0; border-radius:8px; }
+  #words { display:none; max-width:800px; }
+  #watch.off { position:absolute; left:-9999px; top:0; width:100%; max-width:800px; }
+  .add input { flex:1; min-width:0; padding:10px 12px; border:1px solid var(--card); border-radius:8px;
+               background:var(--card); color:var(--fg); font-size:16px; }
+  .w { display:flex; align-items:center; gap:8px; padding:10px 0; border-bottom:1px solid var(--card); }
+  .w span { flex:1; font-size:1.2rem; word-break:break-word; }
+  .w button { padding:4px 10px; font-size:.8rem; }
+  .cq { display:flex; align-items:center; gap:5px; margin:8px 0; font-size:.8rem; flex-wrap:wrap; }
+  .cq button { padding:4px 10px; font-size:.8rem; min-width:30px; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1>中文時間</h1>
+    <button id="wbtn">Words</button>
+  </div>
+
+  <div id="watch">
+    <div class="tabs" id="tabs"></div>
+    <div class="wrap" id="wrap"></div>
+    <div class="ctrl" id="ctrl"></div>
+    <div class="grid" id="grid"></div>
+  </div>
+
+  <div id="words">
+    <div class="add">
+      <input id="winput" placeholder="新詞 / new word" autocomplete="off" autocapitalize="off">
+      <button id="wadd">Add</button>
+    </div>
+    <div class="cq" id="cq"></div>
+    <div id="wlist"></div>
+  </div>
+
+<script>
+  // To add a source: a name plus either videos (list of video IDs), list (playlist ID), or video (one ID).
+  const sources = [
+    { id:"annie", name:"Peppa + Annie", videos:["Iw5wSHPOGoE","ZCkw1ULrfC0","9QBZjFEt_10","WLMIUS50yEA","rKtmlKq3X4c","5ckBzWwCjNQ"] },
+    { id:"peppa", name:"Peppa (official)", list:"PLeXGOj6gnNR3x_DoF0-pEsxamL1oP0oBd" },
+    { id:"everyday", name:"Everyday Chinese", video:"zFHNV3HBBwM" }
+  ];
+  let fb = null, player = null, cur = 0, count = 0, errStreak = 0, poll = null, na = new Set();
+  const $ = id => document.getElementById(id);
+  const get = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
+  const put = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+  const curIdx = () => { try { return Math.max(player.getPlaylistIndex(), 0); } catch (e) { return 0; } };
+  const isMulti = s => s.videos || s.list;
+
+  /* ---------- saved spot ---------- */
+  function savePos(i, t) {
+    if (!player) return;
+    try {
+      if (i === undefined) i = curIdx();
+      if (t === undefined) t = Math.floor(player.getCurrentTime());
+      put("pos:" + sources[cur].id, { i: i, t: t });
+    } catch (e) {}
+  }
+  setInterval(() => { try { if (player && player.getPlayerState() === 1) savePos(); } catch (e) {} }, 4000);
+  document.addEventListener("visibilitychange", () => { if (document.hidden) savePos(); });
+  window.addEventListener("pagehide", () => savePos());
+
+  /* ---------- watched grid ---------- */
+  function renderGrid() {
+    const g = $("grid"); g.innerHTML = "";
+    if (!isMulti(sources[cur])) return;
+    const w = get("watched:" + sources[cur].id, []), c = curIdx();
+    for (let i = 0; i < count; i++) {
+      const b = document.createElement("button");
+      b.textContent = i + 1;
+      if (w.includes(i)) b.classList.add("watched");
+      if (i === c) b.classList.add("cur");
+      if (na.has(i)) b.classList.add("na");
+      b.onclick = () => { errStreak = 0; player.playVideoAt(i); };
+      g.appendChild(b);
+    }
+  }
+  function toggleWatched() {
+    const k = "watched:" + sources[cur].id, i = curIdx();
+    let w = get(k, []); w = w.includes(i) ? w.filter(x => x !== i) : [...w, i];
+    put(k, w); renderGrid();
+  }
+  function buildCtrl() {
+    const c = $("ctrl"); c.innerHTML = "";
+    if (!isMulti(sources[cur])) return;
+    const mk = (t, f) => { const b = document.createElement("button"); b.textContent = t; b.onclick = f; return b; };
+    c.append(
+      mk("◀ Prev", () => { errStreak = 0; player.previousVideo(); }),
+      mk("Next ▶", () => { errStreak = 0; player.nextVideo(); }),
+      mk("✓ Watched / unwatched", toggleWatched)
+    );
+  }
+  function waitForList() {
+    clearInterval(poll);
+    poll = setInterval(() => {
+      let ids = null; try { ids = player.getPlaylist(); } catch (e) {}
+      if (ids && ids.length) { count = ids.length; clearInterval(poll); renderGrid(); }
+    }, 500);
+  }
+  function fallback(s) {
+    try { player.destroy(); } catch (e) {}
+    $("grid").innerHTML = ""; $("ctrl").innerHTML = "";
+    $("wrap").innerHTML = '<iframe allowfullscreen allow="encrypted-media; picture-in-picture" src="https://www.youtube.com/embed/videoseries?list=' + s.list + '"></iframe>';
+  }
+
+  /* ---------- player ---------- */
+  function select(i) {
+    savePos();
+    cur = i; put("tab", i);
+    const s = sources[i], saved = get("pos:" + s.id, null);
+    count = s.videos ? s.videos.length : 0; na = new Set(); errStreak = 0;
+    [...$("tabs").children].forEach((b, j) => b.classList.toggle("on", i === j));
+    $("grid").innerHTML = ""; buildCtrl();
+    if (player) { try { player.destroy(); } catch (e) {} }
+    clearTimeout(fb); clearInterval(poll);
+    $("wrap").innerHTML = '<div id="player"></div>';
+
+    const pv = { playsinline: 1, rel: 0 };
+    const cfg = { width: "100%", height: "100%", playerVars: pv };
+    if (s.videos) { cfg.videoId = s.videos[0]; pv.playlist = s.videos.slice(1).join(","); }
+    else if (s.list) { pv.listType = "playlist"; pv.list = s.list; }
+    else cfg.videoId = s.video;
+    if (s.list && !s.videos) fb = setTimeout(() => { if (!count) fallback(s); }, 8000);
+
+    player = new YT.Player("player", Object.assign(cfg, { events: {
+      onReady: () => {
+        if (saved) {
+          try {
+            if (s.videos) player.cuePlaylist({ playlist: s.videos, index: saved.i, startSeconds: saved.t });
+            else if (s.list) player.cuePlaylist({ listType: "playlist", list: s.list, index: saved.i, startSeconds: saved.t });
+            else player.cueVideoById({ videoId: s.video, startSeconds: saved.t });
+          } catch (e) {}
+        }
+        if (s.videos) renderGrid(); else if (s.list) waitForList();
+      },
+      onStateChange: e => {
+        if (e.data === 1 || e.data === 5) { errStreak = 0; renderGrid(); }
+        if (e.data === 0) {
+          const k = curIdx(), key = "watched:" + s.id; let w = get(key, []);
+          if (!w.includes(k)) { w.push(k); put(key, w); }
+          savePos(count && k + 1 < count ? k + 1 : k, 0); renderGrid();
+        }
+      },
+      onError: () => {
+        if (!isMulti(s)) return;
+        na.add(curIdx()); renderGrid();
+        if (++errStreak < Math.max(count, 1)) player.nextVideo();
+      }
+    }}));
+  }
+
+  /* ---------- word list ---------- */
+  let words = get("words", []);
+  function copy(text, btn) {
+    const done = () => { const o = btn.textContent; btn.textContent = "✓"; setTimeout(() => btn.textContent = o, 900); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => legacy());
+    else legacy();
+    function legacy() {
+      const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t);
+      t.select(); try { document.execCommand("copy"); done(); } catch (e) {} t.remove();
+    }
+  }
+  function renderWords() {
+    $("wbtn").textContent = $("words").style.display === "block" ? "Back" : "Words" + (words.length ? " (" + words.length + ")" : "");
+    const l = $("wlist"); l.innerHTML = "";
+    words.forEach((w, i) => {
+      const r = document.createElement("div"); r.className = "w";
+      const t = document.createElement("span"); t.textContent = w;
+      const c = document.createElement("button"); c.textContent = "Copy"; c.onclick = () => copy(w, c);
+      const x = document.createElement("button"); x.textContent = "✕";
+      x.onclick = () => { words.splice(i, 1); put("words", words); renderWords(); };
+      r.append(t, c, x); l.appendChild(r);
+    });
+  }
+  function addWord() {
+    const v = $("winput").value.trim(); if (!v) return;
+    words = [v, ...words.filter(w => w !== v)];   // newest first, no duplicates
+    put("words", words); $("winput").value = ""; renderWords();
+  }
+  $("wadd").onclick = addWord;
+  $("winput").addEventListener("keydown", e => { if (e.key === "Enter") addWord(); });
+  (function () {
+    const q = $("cq"), lab = document.createElement("span"); lab.textContent = "Copy top";
+    q.appendChild(lab);
+    [2, 3, 4, 5, 6, "All"].forEach(n => {
+      const b = document.createElement("button"); b.textContent = n;
+      b.onclick = () => copy((n === "All" ? words : words.slice(0, n)).join("\n"), b);
+      q.appendChild(b);
+    });
+  })();
+  $("wbtn").onclick = () => {
+    const open = $("words").style.display === "block";
+    $("words").style.display = open ? "none" : "block";
+    $("watch").classList.toggle("off", !open);  // moved off-screen, not removed, so audio can keep playing
+    $("wbtn").classList.toggle("on", !open);
+    renderWords();
+    if (!open) $("winput").focus();
+  };
+
+  /* ---------- start ---------- */
+  sources.forEach((s, i) => {
+    const b = document.createElement("button"); b.textContent = s.name; b.onclick = () => select(i);
+    $("tabs").appendChild(b);
+  });
+  renderWords();
+  window.onYouTubeIframeAPIReady = () => select(Math.min(get("tab", 0), sources.length - 1));
+  const t = document.createElement("script"); t.src = "https://www.youtube.com/iframe_api"; document.head.appendChild(t);
+</script>
+</body>
+</html>
