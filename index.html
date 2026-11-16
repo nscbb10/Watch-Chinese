@@ -5,49 +5,114 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>中文時間</title>
 <style>
-  :root { color-scheme: light dark; --bg: #fff; --fg: #1a1a1a; --card: #f0f0f0; --accent: #d33; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --card: #262626; --accent: #f66; } }
-  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg);
-         font-family: -apple-system, system-ui, sans-serif; }
-  h1 { font-size: 1.3rem; margin: 0 0 12px; }
-  .tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-  .tabs button { padding: 8px 14px; border: 0; border-radius: 999px; background: var(--card);
-                 color: var(--fg); font-size: 0.95rem; }
-  .tabs button.on { background: var(--accent); color: #fff; }
-  .wrap { position: relative; width: 100%; max-width: 800px; aspect-ratio: 16 / 9; }
-  iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 8px; }
-  p { max-width: 800px; font-size: 0.9rem; opacity: 0.75; }
+  :root { color-scheme: light dark; --bg:#fff; --fg:#1a1a1a; --card:#eee; --accent:#d33; --ok:#2a9d4a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111; --fg:#eee; --card:#2a2a2a; --accent:#f66; --ok:#3fb866; } }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font-family:-apple-system,system-ui,sans-serif; }
+  h1 { font-size:1.3rem; margin:0 0 12px; }
+  .tabs, .grid, .ctrl { display:flex; gap:8px; flex-wrap:wrap; margin:12px 0; max-width:800px; }
+  button { padding:8px 14px; border:0; border-radius:999px; background:var(--card); color:var(--fg); font-size:.95rem; }
+  .tabs button.on { background:var(--accent); color:#fff; }
+  .grid button { min-width:40px; padding:8px 0; border-radius:8px; }
+  .grid button.watched { background:var(--ok); color:#fff; }
+  .grid button.cur { outline:3px solid var(--accent); }
+  .grid button.na { opacity:.35; text-decoration:line-through; }
+  .wrap { position:relative; width:100%; max-width:800px; aspect-ratio:16/9; }
+  .wrap iframe { position:absolute; inset:0; width:100%; height:100%; border:0; border-radius:8px; }
+  p { max-width:800px; font-size:.9rem; opacity:.75; }
 </style>
 </head>
 <body>
   <h1>中文時間</h1>
   <div class="tabs" id="tabs"></div>
-  <div class="wrap"><iframe id="player" title="Video player"
-    allow="accelerometer; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>
+  <div class="wrap" id="wrap"></div>
+  <div class="ctrl" id="ctrl"></div>
+  <div class="grid" id="grid"></div>
   <p id="note"></p>
+
+<script src="https://www.youtube.com/iframe_api"></script>
 <script>
-  // To add a source: add a line here with a name, a YouTube playlist ID, and a note.
+  // To add a source: add a line with a name and either a playlist ID (list) or a single video ID (video).
   const sources = [
-    { name: "Peppa + Annie", list: "PLqNEwlNzCkYHxyxnuhLRed93TIyeNsKNd",
-      note: "Learning version with sentence breakdowns. Members-only videos won't play; skip to the next." },
-    { name: "Peppa (official)", list: "PLeXGOj6gnNR3x_DoF0-pEsxamL1oP0oBd",
-      note: "Original Mandarin episodes. No subtitles." }
+    { id:"annie", name:"Peppa + Annie", list:"PLqNEwlNzCkYHxyxnuhLRed93TIyeNsKNd" },
+    { id:"peppa", name:"Peppa (official)", list:"PLeXGOj6gnNR3x_DoF0-pEsxamL1oP0oBd" },
+    { id:"everyday", name:"Everyday Chinese", video:"zFHNV3HBBwM" }
   ];
-  const tabs = document.getElementById("tabs");
-  const player = document.getElementById("player");
-  const note = document.getElementById("note");
-  function show(i) {
-    player.src = "https://www.youtube.com/embed/videoseries?list=" + sources[i].list;
-    note.textContent = sources[i].note;
-    [...tabs.children].forEach((b, j) => b.classList.toggle("on", i === j));
+  let player = null, cur = 0, count = 0, errStreak = 0, poll = null, na = new Set(), apiReady = false;
+
+  const $ = id => document.getElementById(id);
+  const key = () => "watched:" + sources[cur].id;
+  function load() { try { return JSON.parse(localStorage.getItem(key())) || []; } catch (e) { return []; } }
+  function save(a) { try { localStorage.setItem(key(), JSON.stringify(a)); } catch (e) {} }
+  const curIdx = () => { try { return player.getPlaylistIndex(); } catch (e) { return -1; } };
+
+  function renderGrid() {
+    const g = $("grid"); g.innerHTML = "";
+    if (!sources[cur].list) return;
+    const w = load(), c = curIdx();
+    for (let i = 0; i < count; i++) {
+      const b = document.createElement("button");
+      b.textContent = i + 1;
+      if (w.includes(i)) b.classList.add("watched");
+      if (i === c) b.classList.add("cur");
+      if (na.has(i)) b.classList.add("na");
+      b.onclick = () => { errStreak = 0; player.playVideoAt(i); };
+      g.appendChild(b);
+    }
+  }
+  function toggleWatched() {
+    const i = curIdx(); if (i < 0) return;
+    let w = load(); w = w.includes(i) ? w.filter(x => x !== i) : [...w, i];
+    save(w); renderGrid();
+  }
+  function buildCtrl() {
+    const c = $("ctrl"); c.innerHTML = "";
+    if (!sources[cur].list) return;
+    const n = document.createElement("button"); n.textContent = "Next ▶";
+    n.onclick = () => { errStreak = 0; player.nextVideo(); };
+    const m = document.createElement("button"); m.textContent = "✓ Watched / unwatched";
+    m.onclick = toggleWatched;
+    c.append(n, m);
+  }
+  function waitForList() {
+    clearInterval(poll);
+    poll = setInterval(() => {
+      let ids = null; try { ids = player.getPlaylist(); } catch (e) {}
+      if (ids && ids.length) { count = ids.length; clearInterval(poll); renderGrid(); }
+    }, 500);
+  }
+  function select(i) {
+    cur = i; count = 0; na = new Set(); errStreak = 0;
+    [...$("tabs").children].forEach((b, j) => b.classList.toggle("on", i === j));
+    $("grid").innerHTML = ""; buildCtrl();
+    $("note").textContent = sources[i].list
+      ? "Tap a number to jump to that video. Green = watched. Crossed out = couldn't play (members-only or blocked)."
+      : "";
+    if (player) { try { player.destroy(); } catch (e) {} }
+    $("wrap").innerHTML = '<div id="player"></div>';
+    const s = sources[i];
+    const pv = { playsinline: 1, rel: 0 };
+    if (s.list) { pv.listType = "playlist"; pv.list = s.list; }
+    player = new YT.Player("player", {
+      width: "100%", height: "100%", videoId: s.video, playerVars: pv,
+      events: {
+        onReady: () => { if (s.list) waitForList(); },
+        onStateChange: e => {
+          if (e.data === 1) { errStreak = 0; renderGrid(); }
+          if (e.data === 0 && s.list) { const k = curIdx(); let w = load(); if (!w.includes(k)) { w.push(k); save(w); } renderGrid(); }
+        },
+        onError: () => {
+          if (!sources[cur].list) return;
+          na.add(curIdx()); renderGrid();
+          if (++errStreak < Math.max(count, 1)) player.nextVideo(); // auto-skip unplayable videos
+        }
+      }
+    });
   }
   sources.forEach((s, i) => {
-    const b = document.createElement("button");
-    b.textContent = s.name;
-    b.onclick = () => show(i);
-    tabs.appendChild(b);
+    const b = document.createElement("button"); b.textContent = s.name; b.onclick = () => select(i);
+    $("tabs").appendChild(b);
   });
-  show(0);
+  window.onYouTubeIframeAPIReady = () => select(0);
 </script>
 </body>
 </html>
