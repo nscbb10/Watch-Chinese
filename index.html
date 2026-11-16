@@ -5,23 +5,49 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>中文時間</title>
 <style>
-  :root { color-scheme: light dark; --bg: #fff; --fg: #1a1a1a; }
-  @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; } }
+  :root { color-scheme: light dark; --bg: #fff; --fg: #1a1a1a; --card: #f0f0f0; --accent: #d33; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --card: #262626; --accent: #f66; } }
   body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg);
          font-family: -apple-system, system-ui, sans-serif; }
   h1 { font-size: 1.3rem; margin: 0 0 12px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .tabs button { padding: 8px 14px; border: 0; border-radius: 999px; background: var(--card);
+                 color: var(--fg); font-size: 0.95rem; }
+  .tabs button.on { background: var(--accent); color: #fff; }
   .wrap { position: relative; width: 100%; max-width: 800px; aspect-ratio: 16 / 9; }
   iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; border-radius: 8px; }
+  p { max-width: 800px; font-size: 0.9rem; opacity: 0.75; }
 </style>
 </head>
 <body>
   <h1>中文時間</h1>
-  <div class="wrap">
-    <iframe
-      src="https://www.youtube.com/embed/videoseries?list=PLeXGOj6gnNR3x_DoF0-pEsxamL1oP0oBd"
-      title="Peppa Pig Mandarin playlist"
-      allow="accelerometer; encrypted-media; picture-in-picture"
-      allowfullscreen></iframe>
-  </div>
+  <div class="tabs" id="tabs"></div>
+  <div class="wrap"><iframe id="player" title="Video player"
+    allow="accelerometer; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>
+  <p id="note"></p>
+<script>
+  // To add a source: add a line here with a name, a YouTube playlist ID, and a note.
+  const sources = [
+    { name: "Peppa + Annie", list: "PLqNEwlNzCkYHxyxnuhLRed93TIyeNsKNd",
+      note: "Learning version with sentence breakdowns. Members-only videos won't play; skip to the next." },
+    { name: "Peppa (official)", list: "PLeXGOj6gnNR3x_DoF0-pEsxamL1oP0oBd",
+      note: "Original Mandarin episodes. No subtitles." }
+  ];
+  const tabs = document.getElementById("tabs");
+  const player = document.getElementById("player");
+  const note = document.getElementById("note");
+  function show(i) {
+    player.src = "https://www.youtube.com/embed/videoseries?list=" + sources[i].list;
+    note.textContent = sources[i].note;
+    [...tabs.children].forEach((b, j) => b.classList.toggle("on", i === j));
+  }
+  sources.forEach((s, i) => {
+    const b = document.createElement("button");
+    b.textContent = s.name;
+    b.onclick = () => show(i);
+    tabs.appendChild(b);
+  });
+  show(0);
+</script>
 </body>
 </html>
